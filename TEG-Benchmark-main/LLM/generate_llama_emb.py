@@ -164,3 +164,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+#python script.py --model_name meta-llama/Llama-2-7b-hf --pkl_file path/to/your/file.pkl
