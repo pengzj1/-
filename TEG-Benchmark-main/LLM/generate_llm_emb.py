@@ -130,10 +130,22 @@ def main():
 
     print("output_file:", output_file)
 
+    # ...existing code...
+
     pkl_file = os.path.join(base_dir, args.pkl_file)
     with open(pkl_file, "rb") as f:
         data = pickle.load(f)
-    text_data = data.text_nodes + data.text_edges  
+    
+    # Check if text_edges exists and is not empty
+    has_edge_text = hasattr(data, 'text_edges') and len(data.text_edges) > 0
+    
+    # If has edge text, combine with node text. Otherwise, just use node text
+    if has_edge_text:
+        text_data = data.text_nodes + data.text_edges
+        print(f"Processing {len(data.text_nodes)} nodes and {len(data.text_edges)} edges...")
+    else:
+        text_data = data.text_nodes
+        print(f"Processing {len(data.text_nodes)} nodes. No edge text found, will initialize randomly.")
 
     # Load tokenizer and Model
     tokenizer = AutoTokenizer.from_pretrained(
@@ -172,17 +184,39 @@ def main():
 
     # CLS representatoin
     if args.cls:
-        if not os.path.exists(output_file + "_cls_node.pt") or not os.path.exists(output_file + "_cls_edge.pt"):
+        if not os.path.exists(output_file + "_cls_node.pt") or (has_edge_text and not os.path.exists(output_file + "_cls_edge.pt")) or (not has_edge_text and not os.path.exists(output_file + "_cls_edge.pt")):
             trainer = Trainer(model=CLS_Feateres_Extractor, args=inference_args)
             cls_emb = trainer.predict(dataset)
-            node_cls_emb = torch.from_numpy(cls_emb.predictions[: len(data.text_nodes)])    
-            edge_cls_emb = torch.from_numpy(cls_emb.predictions[len(data.text_nodes) :])
+            
+            # Always save node embeddings
+            node_cls_emb = torch.from_numpy(cls_emb.predictions[: len(data.text_nodes)])
             torch.save(node_cls_emb, output_file + "_cls_node.pt")
-            torch.save(edge_cls_emb, output_file + "_cls_edge.pt")
-            print("Existing saved to the {}".format(output_file))
-
+            
+            # Handle edge embeddings based on availability
+            if has_edge_text:
+                edge_cls_emb = torch.from_numpy(cls_emb.predictions[len(data.text_nodes):])
+                torch.save(edge_cls_emb, output_file + "_cls_edge.pt")
+                print(f"Node and edge embeddings saved to {output_file}_cls_node.pt and {output_file}_cls_edge.pt")
+            else:
+                # For missing edge text, initialize randomly with Xavier uniform
+                # Get the embedding dimension from the node embeddings
+                hidden_size = node_cls_emb.shape[1]
+                
+                # Check if data.edge_index exists
+                if hasattr(data, 'edge_index'):
+                    num_edges = data.edge_index.shape[1]
+                else:
+                    # Fallback if edge_index doesn't exist
+                    print("Warning: edge_index not found, assuming 0 edges")
+                    num_edges = 0
+                
+                edge_cls_emb = torch.empty((num_edges, hidden_size))
+                torch.nn.init.xavier_uniform_(edge_cls_emb)
+                torch.save(edge_cls_emb, output_file + "_cls_edge.pt")
+                print(f"Node embeddings saved to {output_file}_cls_node.pt")
+                print(f"Randomly initialized edge embeddings saved to {output_file}_cls_edge.pt")
         else:
-            print("Existing saved CLS")
+            print("Existing saved CLS embeddings found")
     else:
         raise ValueError("others are not defined")
 
